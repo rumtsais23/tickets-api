@@ -2,8 +2,11 @@ from flask import Flask, jsonify, request
 import requests
 import sqlite3
 import uuid
+import stripe
 
 app = Flask(__name__)
+
+stripe.api_key = "sk_test_123456..."
 
 # ---------------- DATABASE ----------------
 def init_db():

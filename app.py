@@ -1,12 +1,21 @@
+from routes.threat_model import threat_bp
+from routes.security import security_bp
+from routes.analyze import analyze_bp
 from flask import Flask, jsonify, request
 import requests
 import sqlite3
 import uuid
 import stripe
+import os
+from openai import OpenAI
 
 app = Flask(__name__)
+app.register_blueprint(analyze_bp)
+app.register_blueprint(security_bp)
+app.register_blueprint(threat_bp)
 
-stripe.api_key = "sk_test_123456..."
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+stripe.api_key = os.getenv("STRIPE_API_KEY")
 
 # ---------------- DATABASE ----------------
 def init_db():
@@ -134,9 +143,6 @@ def upgrade():
 
     return jsonify({"message": "Upgraded to PRO"})
     
-    import stripe
-
-stripe.api_key = "YOUR_SECRET_KEY"
 
 @app.route('/create-checkout', methods=['GET'])
 def create_checkout():
@@ -171,7 +177,6 @@ def create_checkout():
 @app.route('/webhook', methods=['POST'])
 def stripe_webhook():
 
-    payload = request.data
     event = stripe.Event.construct_from(
         request.get_json(), stripe.api_key
     )
@@ -196,7 +201,80 @@ def stripe_webhook():
         conn.close()
 
     return jsonify({"status": "success"})
-    
+
+# -------- AI SECURITY --------
+@app.route('/analyze-text', methods=['POST'])
+def analyze_text():
+    data = request.json or {}
+    text = data.get("text")
+
+    if not text:
+        return jsonify({"error": "No text provided"}), 400
+
+    prompt = f"""
+You are a cybersecurity AI assistant.
+
+Analyze the text and classify it:
+- prompt injection attempt
+- malicious intent
+- sensitive data leakage
+- safe input
+
+Text:
+{text}
+
+Return:
+risk_level (low/medium/high)
+explanation (short)
+"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        result = response.choices[0].message.content
+
+        return jsonify({
+            "analysis": result
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# -------- CODE ANALYSIS --------
+@app.route("/analyze-code", methods=["POST"])
+def analyze_code():
+    try:
+        data = request.get_json()
+        code = data.get("code", "")
+
+        if not code:
+            return jsonify({"error": "No code provided"}), 400
+
+        response = client.responses.create(
+            model="gpt-4.1-mini",
+            input=f"""
+Analyze the following code:
+
+{code}
+
+Return:
+- issues
+- improvements
+- explanation
+"""
+        )
+
+        return jsonify({
+            "result": response.output_text
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # ---------------- RUN ----------------
 if __name__ == '__main__':
     app.run(debug=True)
